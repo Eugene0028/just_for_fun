@@ -4,17 +4,10 @@ from pathlib import Path
 import sys
 
 from .engine import Game
+from .presentation import format_effects
 
 
 DEFAULT_DATA = Path(__file__).resolve().parent.parent / 'data/childhood.json'
-
-
-def format_effects(effects):
-    if effects is None:
-        return 'неизвестны'
-    parts = [f'{key} {delta:+d}' for key, delta in effects.get('stats', {}).items()]
-    parts += [key if value is True else f'{key}: {value}' for key, value in effects.get('flags', {}).items()]
-    return '; '.join(parts) or 'без изменений'
 
 
 def show_state(game):
@@ -23,23 +16,6 @@ def show_state(game):
         print(group + ': ' + ' · '.join(f"{key.removeprefix('Отношения: ')}: {game.stats[key]}" for key in keys))
     active = [key for key, value in game.flags.items() if value]
     print('Состояния: ' + (', '.join(active) or 'нет'))
-
-
-def show_sources(game):
-    event = game.events[game.current]
-    sources = {source['id']: source for source in game.data.get('sources', [])}
-    references = event.get('source', []) + [ref for choice in event['choices'] for ref in choice.get('source', [])]
-    seen = set()
-    for reference in references:
-        identity = (reference['source'], reference.get('location', ''))
-        if identity in seen:
-            continue
-        seen.add(identity)
-        source = sources.get(reference['source'], {})
-        print(f"  {source.get('title', reference['source'])}: {source.get('url', source.get('file', ''))} — {reference.get('location', '')}")
-    for choice in event['choices']:
-        if choice.get('notes'):
-            print(choice['label'] + ': ' + ' '.join(choice['notes']))
 
 
 def show_event(game):
@@ -59,16 +35,15 @@ def show_event(game):
         print('   Последствия: ' + format_effects(choice['effects']))
         if blocked:
             print('   Не хватает: ' + '; '.join(blocked))
-        if choice.get('notes'):
-            print('   * Есть примечание к источникам (команда s).')
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description='Глава I «Детство»: терминальная реконструкция по руководствам')
+    parser = argparse.ArgumentParser(description='Глава I «Детство»: графическая игра с запасным терминальным режимом')
     parser.add_argument('--data', type=Path, default=DEFAULT_DATA)
     parser.add_argument('--list-events', action='store_true', help='Показать события и число вариантов без запуска игры')
     parser.add_argument('--audit', action='store_true', help='Показать ограничения достоверности данных')
     parser.add_argument('--goal', action='append', default=[], help='Личная цель: название свершения; можно указать несколько')
+    parser.add_argument('--cli', action='store_true', help='Запустить терминальный режим вместо окна')
     args = parser.parse_args(argv)
     try:
         game = Game(json.loads(args.data.read_text(encoding='utf-8')))
@@ -90,9 +65,19 @@ def main(argv=None):
     if not game.events:
         print('Данные главы ещё не получены из источников.')
         return 0
+    if not args.cli:
+        try:
+            from .gui import launch
+        except ImportError:
+            parser.exit(1, 'Для окна нужен Tkinter. На Debian/Ubuntu: sudo apt install python3-tk.\nТерминальный режим: python3 -m brante --cli\n')
+        from tkinter import TclError
+        try:
+            launch(game.data, args.goal)
+        except TclError as error:
+            parser.exit(1, f'Не удалось открыть окно: {error}\nТерминальный режим: python3 -m brante --cli\n')
+        return 0
     print(game.data.get('chapter', 'Игра'))
-    print('Правила восстановлены по руководствам; спорные места: --audit.')
-    print('Введите номер выбора. s — источники события; q — выход.')
+    print('Введите номер выбора. q — выход.')
     if args.goal:
         print('Твои цели: ' + ', '.join(args.goal))
     while game.current is not None:
@@ -103,9 +88,6 @@ def main(argv=None):
                 if answer == 'q':
                     print('Прохождение прервано.')
                     return 0
-                if answer == 's':
-                    show_sources(game)
-                    continue
                 game.choose(int(answer) - 1)
                 break
             except (ValueError, IndexError) as error:

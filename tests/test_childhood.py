@@ -135,7 +135,7 @@ class ChildhoodTests(unittest.TestCase):
         game = play(LOYALIST)
         answers = '\n'.join(str(index + 1) for _, index in game.history) + '\n'
         result = subprocess.run(
-            [sys.executable, '-m', 'brante', '--goal', 'Причастие дворянина'],
+            [sys.executable, '-m', 'brante', '--cli', '--goal', 'Причастие дворянина'],
             cwd=ROOT, input=answers, capture_output=True, text=True,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
