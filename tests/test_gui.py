@@ -11,7 +11,7 @@ except ImportError:
     tk = None
 
 if tk is not None:
-    from brante.gui import GREEN
+    from brante.gui import GREEN, TEXT, PaintedButton
 from test_childhood import LOYALIST
 
 
@@ -78,6 +78,42 @@ class GuiTests(unittest.TestCase):
         self.assertEqual(self.app.game.current, 'hide_and_seek')
         self.assertEqual(self.app.game.stats['Решительность'], 1)
 
+    def test_mouse_release_and_enter_activate_painted_buttons(self):
+        button = self.app.choice_buttons[0]
+        button.event_generate('<ButtonPress-1>', x=10, y=10)
+        button.event_generate('<ButtonRelease-1>', x=10, y=10)
+        self.root.update()
+        self.assertEqual(self.app.game.current, 'hide_and_seek')
+        button = self.app.choice_buttons[1]
+        button.focus_force()
+        self.root.update()
+        button.event_generate('<Return>')
+        self.root.update()
+        self.assertEqual(self.app.game.current, 'descent')
+
+    def test_controls_have_no_native_button_or_scrollbar_surfaces(self):
+        widgets = [self.root]
+        while widgets:
+            widget = widgets.pop()
+            widgets.extend(widget.winfo_children())
+            self.assertNotIsInstance(widget, (tk.Button, tk.Scrollbar))
+        button = self.app.choice_buttons[0]
+        self.assertIsInstance(button, PaintedButton)
+        self.assertEqual(button.itemcget(button.text_item, 'fill'), TEXT)
+        self.assertNotEqual(button.cget('bg'), TEXT)
+
+    def test_drag_scrollbar_reaches_bottom(self):
+        self.root.geometry('940x700')
+        self.app.game.current = 'guest'
+        self.app.render()
+        self.root.update()
+        scrollbar = self.app.scene.scrollbar
+        event = tk.Event()
+        event.y = scrollbar.winfo_height()
+        scrollbar._press(event)
+        self.root.update()
+        self.assertGreater(self.app.scene.canvas.yview()[0], 0)
+
     def test_small_window_scroll_keeps_last_choice_accessible(self):
         self.root.geometry('940x700')
         self.app.game.current = 'guest'
@@ -98,7 +134,7 @@ class GuiTests(unittest.TestCase):
         while widgets:
             widget = widgets.pop()
             widgets.extend(widget.winfo_children())
-            if isinstance(widget, (tk.Label, tk.Button)):
+            if isinstance(widget, (tk.Label, PaintedButton)):
                 texts.append(str(widget.cget('text')))
         text = '\n'.join(texts).lower()
         self.assertNotIn('ods', text)

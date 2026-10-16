@@ -17,12 +17,107 @@ GREEN = '#90cfaa'
 RED = '#e7a39a'
 
 
+class PaintedButton(tk.Canvas):
+    """Canvas text/background avoid Aqua's native white button surface."""
+
+    def __init__(self, parent, text, command, font, bg=CARD, fg=TEXT,
+                 state='normal', padx=15, pady=9, wraplength=520):
+        self.text = text
+        self.command = command
+        self.normal_bg = bg
+        self.foreground = fg
+        self.padx = padx
+        self.pady = pady
+        self.pressed = False
+        metrics = tkfont.Font(root=parent, font=font)
+        width = min(wraplength, metrics.measure(text)) + padx * 2 + 8
+        super().__init__(parent, width=width, height=metrics.metrics('linespace') + pady * 2,
+                         bg=bg, bd=0, highlightthickness=1, state=state,
+                         highlightbackground=bg, highlightcolor=ACCENT,
+                         takefocus=state != 'disabled', cursor='arrow' if state == 'disabled' else 'hand2')
+        self.text_item = self.create_text(padx, pady, anchor='nw', text=text, font=font,
+                                          fill=MUTED if state == 'disabled' else fg,
+                                          disabledfill=MUTED, width=wraplength)
+        self.bind('<Configure>', self._layout)
+        self.bind('<Enter>', self._enter)
+        self.bind('<Leave>', self._leave)
+        self.bind('<ButtonPress-1>', self._press)
+        self.bind('<ButtonRelease-1>', self._release)
+        self.bind('<Return>', lambda _: self.invoke())
+        self.bind('<space>', lambda _: self.invoke())
+
+    def cget(self, key):
+        return self.text if key == 'text' else super().cget(key)
+
+    def _layout(self, event):
+        self.itemconfigure(self.text_item, width=max(20, event.width - self.padx * 2 - 4))
+        bounds = self.bbox(self.text_item)
+        if bounds:
+            height = bounds[3] - bounds[1] + self.pady * 2
+            if int(super().cget('height')) != height:
+                self.configure(height=height)
+
+    def _enter(self, _):
+        if self.cget('state') != 'disabled':
+            self.configure(bg=BORDER)
+
+    def _leave(self, _):
+        self.pressed = False
+        self.configure(bg=self.normal_bg)
+
+    def _press(self, _):
+        if self.cget('state') != 'disabled':
+            self.pressed = True
+            self.focus_set()
+
+    def _release(self, event):
+        activate = self.pressed and 0 <= event.x < self.winfo_width() and 0 <= event.y < self.winfo_height()
+        self.pressed = False
+        if activate:
+            self.invoke()
+
+    def invoke(self):
+        if self.cget('state') != 'disabled':
+            return self.command()
+
+
+class PaintedScrollbar(tk.Canvas):
+    """A dark draggable thumb, independent of the native scrollbar theme."""
+
+    def __init__(self, parent, command, background):
+        super().__init__(parent, width=11, bg=background, bd=0, highlightthickness=0)
+        self.command = command
+        self.first, self.last = 0.0, 1.0
+        self.offset = 0
+        self.thumb = self.create_rectangle(3, 0, 8, 0, fill=BORDER, outline='')
+        self.bind('<Configure>', lambda _: self.set(self.first, self.last))
+        self.bind('<Button-1>', self._press)
+        self.bind('<B1-Motion>', self._drag)
+
+    def set(self, first, last):
+        self.first, self.last = float(first), float(last)
+        height = self.winfo_height()
+        self.coords(self.thumb, 3, self.first * height, 8, self.last * height)
+        self.itemconfigure(self.thumb, state='hidden' if self.last - self.first >= 0.999 else 'normal')
+
+    def _press(self, event):
+        top, bottom = self.first * self.winfo_height(), self.last * self.winfo_height()
+        if top <= event.y <= bottom:
+            self.offset = event.y - top
+        else:
+            self.offset = (bottom - top) / 2
+            self._drag(event)
+
+    def _drag(self, event):
+        fraction = (event.y - self.offset) / max(1, self.winfo_height())
+        self.command('moveto', max(0, min(1 - (self.last - self.first), fraction)))
+
+
 class ScrollPane(tk.Frame):
     def __init__(self, parent, background=BG, **kwargs):
         super().__init__(parent, bg=background, **kwargs)
         self.canvas = tk.Canvas(self, bg=background, highlightthickness=0, bd=0)
-        self.scrollbar = tk.Scrollbar(self, orient='vertical', command=self.canvas.yview,
-                                      bg=PANEL, troughcolor=background, width=11)
+        self.scrollbar = PaintedScrollbar(self, command=self.canvas.yview, background=background)
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
         self.canvas.pack(side='left', fill='both', expand=True)
         self.scrollbar.pack(side='right', fill='y')
@@ -101,10 +196,7 @@ class BranteApp:
                         font=font or self.body_font, anchor='w', justify='left', **kwargs)
 
     def button(self, parent, text, command):
-        return tk.Button(parent, text=text, command=command, bg=CARD, fg=TEXT,
-                         activebackground=BORDER, activeforeground=TEXT, relief='flat',
-                         bd=0, padx=15, pady=9, cursor='hand2', highlightthickness=1,
-                         highlightbackground=BORDER, highlightcolor=ACCENT)
+        return PaintedButton(parent, text=text, command=command, font=self.body_font)
 
     def _scroll(self, event):
         target = self.root.winfo_containing(self.root.winfo_pointerx(), self.root.winfo_pointery())
@@ -204,14 +296,10 @@ class BranteApp:
             card = tk.Frame(parent, bg=CARD if not blockers else PANEL,
                             highlightbackground=BORDER, highlightthickness=1, padx=16, pady=12)
             card.pack(fill='x', pady=(0, 12))
-            button = tk.Button(card, text=f"{index + 1}   {choice['label']}", command=lambda i=index: self.choose(i),
+            button = PaintedButton(card, text=f"{index + 1}   {choice['label']}", command=lambda i=index: self.choose(i),
                                state='disabled' if blockers else 'normal', font=(self.font_family, 12, 'bold'),
-                               bg=card.cget('bg'), fg=TEXT, disabledforeground=MUTED, activebackground=BORDER,
-                               activeforeground=ACCENT, relief='flat', bd=0, anchor='w', justify='left',
-                               cursor='arrow' if blockers else 'hand2', highlightthickness=1,
-                               highlightbackground=card.cget('bg'), highlightcolor=ACCENT, padx=0, pady=4, wraplength=520)
+                               bg=card.cget('bg'), fg=TEXT, padx=0, pady=4, wraplength=520)
             button.pack(fill='x')
-            button.bind('<Configure>', lambda e, b=button: b.configure(wraplength=max(100, e.width - 8)))
             self.choice_buttons.append(button)
             conditions = choice['requirements']
             condition_text = ('Не хватает: ' + '; '.join(blockers)) if blockers else (
